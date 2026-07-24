@@ -26,3 +26,29 @@ python3 crawler.py export --output data/vehicles.csv
 
 数据库默认位于 `data/vehicles.sqlite3`。节点的 API 原始字段均被保留，并额外记录每个
 非叶节点是否已经抓取过子节点。CSV 包含 `year,make,model,trim,engine,leaf_level,leaf_id`。
+
+## 导入 MySQL
+
+安装 MySQL 驱动，然后把 SQLite 的 `nodes` 表批量导入 MySQL：
+
+```bash
+python3 -m pip install -r requirements.txt
+MYSQL_PASSWORD='你的密码' python3 import_mysql.py
+```
+
+脚本默认连接 `129.211.12.58:22008/yt`，用户名为 `root`，目标表为
+`vehicle_nodes`。重复运行使用主键 upsert，不会生成重复节点。连接信息也可以覆盖：
+
+```bash
+MYSQL_DB_URL='jdbc:mysql://host:3306/db?characterEncoding=utf-8&useSSL=false' \
+MYSQL_USERNAME='root' MYSQL_PASSWORD='你的密码' python3 import_mysql.py
+```
+
+将节点树重建为扁平的车型组合，并导入已存在的 `vehicles_20260723` 表：
+
+```bash
+MYSQL_PASSWORD='你的密码' python3 import_vehicle_paths_mysql.py
+```
+
+该脚本将 `is_leaf=true` 或第 5 级节点视为完整路径，并在导入前读取目标表现有组合，
+跳过已经存在的 `year/make/model/trim/engine` 记录。

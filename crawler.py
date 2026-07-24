@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import http.client
 import json
 import logging
 import random
@@ -57,7 +58,13 @@ def request_children(parent_id: str, attribute_id: int, timeout: float, retries:
             if not isinstance(payload, list):
                 raise ValueError(f"API returned {type(payload).__name__}, expected list")
             return payload
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            ConnectionError,
+            http.client.HTTPException,
+            json.JSONDecodeError,
+        ) as exc:
             if attempt == retries:
                 raise RuntimeError(
                     f"request failed: parentId={parent_id}, attributeId={attribute_id}"
@@ -72,10 +79,19 @@ def save_nodes(db: sqlite3.Connection, nodes: list[dict]) -> None:
     rows = []
     for node in nodes:
         try:
+            root_id = node.get("rootId")
+            if root_id is None:
+                parent = db.execute(
+                    "SELECT id, attribute_id, root_id FROM nodes WHERE id=?",
+                    (str(node["parentId"]),),
+                ).fetchone()
+                if parent is None:
+                    raise ValueError(f"cannot derive rootId: parent {node['parentId']} is missing")
+                root_id = parent["id"] if parent["attribute_id"] == 1 else parent["root_id"]
             rows.append(
                 (
                     str(node["id"]), int(node["attributeId"]), str(node["parentId"]),
-                    str(node["rootId"]), int(node["level"]), int(bool(node["isLeaf"])),
+                    str(root_id), int(node["level"]), int(bool(node["isLeaf"])),
                     str(node["value"]),
                 )
             )

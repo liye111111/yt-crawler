@@ -1,0 +1,180 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "e8a13761-d68e-4988-bd8d-92265b3810fc",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "data_meta": {
+      "name": "data_meta",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "vehicle_paths": {
+      "name": "vehicle_paths",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "make": {
+          "name": "make",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "trim": {
+          "name": "trim",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "engine": {
+          "name": "engine",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "make_normalized": {
+          "name": "make_normalized",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "model_normalized": {
+          "name": "model_normalized",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "trim_normalized": {
+          "name": "trim_normalized",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "engine_normalized": {
+          "name": "engine_normalized",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "path_key": {
+          "name": "path_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "vehicle_paths_path_key_uq": {
+          "name": "vehicle_paths_path_key_uq",
+          "columns": [
+            "path_key"
+          ],
+          "isUnique": true
+        },
+        "vehicle_paths_year_idx": {
+          "name": "vehicle_paths_year_idx",
+          "columns": [
+            "year"
+          ],
+          "isUnique": false
+        },
+        "vehicle_paths_year_make_idx": {
+          "name": "vehicle_paths_year_make_idx",
+          "columns": [
+            "year",
+            "make"
+          ],
+          "isUnique": false
+        },
+        "vehicle_paths_year_make_model_idx": {
+          "name": "vehicle_paths_year_make_model_idx",
+          "columns": [
+            "year",
+            "make",
+            "model"
+          ],
+          "isUnique": false
+        },
+        "vehicle_paths_full_lookup_idx": {
+          "name": "vehicle_paths_full_lookup_idx",
+          "columns": [
+            "year",
+            "make",
+            "model",
+            "trim"
+          ],
+          "isUnique": false
+        },
+        "vehicle_paths_normalized_idx": {
+          "name": "vehicle_paths_normalized_idx",
+          "columns": [
+            "year",
+            "make_normalized",
+            "model_normalized"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

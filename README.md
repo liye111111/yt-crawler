@@ -7,9 +7,9 @@
 ```text
 .
 ├── crawler/   # 数据抓取、SQLite、MySQL 导入及测试
-├── site/      # Cloudflare Workers 站点和 API
+├── site/      # Cloudflare Workers 站点、VIN API 和本地车型数据
 └── TASKS.md   # POC 开发任务与验收标准
 ```
 
-爬虫的运行与数据导入说明见 [`crawler/README.md`](crawler/README.md)。Cloudflare
-站点的开发工作按 [`TASKS.md`](TASKS.md) 执行。
+爬虫的运行与数据导入说明见 [`crawler/README.md`](crawler/README.md)。站点运行说明见
+[`site/README.md`](site/README.md)，后续工作按 [`TASKS.md`](TASKS.md) 执行。

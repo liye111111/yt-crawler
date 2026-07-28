@@ -1,5 +1,19 @@
 # 车型查询 POC 开发任务
 
+## 当前进度（2026-07-27）
+
+- [x] `site/` 已初始化 Cloudflare Workers + React + TypeScript 工程。
+- [x] 已使用 `vehicles_2026-07-27.csv` 导入 Wrangler/Miniflare 本地 D1。
+- [x] 已完成五级车型联动查询页面。
+- [x] 已接入 vPIC VIN 解码接口和基础本地车型自动匹配。
+- [x] 已完成构建测试、无效 VIN 测试和车型目录完整性测试。
+- [x] 已迁移到 D1，并由五级服务端 API 提供查询。
+- [ ] 增加服务端模糊搜索和 VIN 缓存。
+- [ ] 增加真实 VIN 样本匹配率评估。
+- [ ] 部署到 Cloudflare 并配置访问策略。
+
+当前 POC 本地使用 Miniflare D1；线上部署时使用同一 schema 和 migration 创建真实 D1。
+
 ## 1. 项目目标
 
 使用 Cloudflare Workers、D1 和现有五级车型数据，交付一个可公开访问的车型查询 POC：

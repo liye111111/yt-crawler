@@ -1,4 +1,4 @@
-# Vehicle Lens 车型查询 POC
+# Vehicle Lens 车型查询站点
 
 基于 Cloudflare Workers 的车型查询站点。本地使用 Wrangler/Miniflare 模拟 D1，线上可以
 使用相同的 schema、migration 和查询代码连接 Cloudflare D1。
@@ -65,6 +65,7 @@ GET  /api/vehicles/trims?year=2025&make=Toyota&model=Camry
 GET  /api/vehicles/engines?year=2025&make=Toyota&model=Camry&trim=XSE
 GET  /api/vehicles/details?year=2025&make=Toyota&model=Camry
 POST /api/vin/decode
+POST /api/vin/enrich
 POST /api/vin/pattern
 GET  /api/vin/random
 ```
@@ -73,6 +74,26 @@ VIN 请求示例：
 
 ```json
 {"vin":"JTDKN3DU4A0000000"}
+```
+
+`/api/vin/enrich` 是 Worker 服务端的 Gemini 补充解析接口。它先读取 NHTSA 上下文，
+再通过 Gemini Google Search 查询 WMI、VDS、年款码和工厂码的公开资料。发送给 Gemini
+的 VIN 会隐藏第12–17位生产序列号，响应中的每段信息均标记为 `inferred` 或
+`unverified`，并附带搜索引用；它不会覆盖 NHTSA 已确认的数据。
+
+接口返回结构示例：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "vin": "LBV31FX08RM******",
+    "source": "gemini-google-search",
+    "segments": [],
+    "sources": [],
+    "disclaimer": "Gemini 内容是基于公开网页的补充推断……"
+  }
+}
 ```
 
 VIN 输入区的“随机 VIN”按钮会调用 `/api/vin/random`。Worker 服务端请求
@@ -121,7 +142,7 @@ npm test
 在 Cloudflare Dashboard 中创建一个 D1 数据库，并记录数据库名称和 UUID。创建 API
 Token 时需要授予 Workers Scripts 和 D1 编辑权限。
 
-编辑项目根目录的 `.env`，填写以下5项：
+编辑项目根目录的 `.env`，填写以下配置：
 
 ```dotenv
 CLOUDFLARE_ACCOUNT_ID=
@@ -129,9 +150,38 @@ CLOUDFLARE_API_TOKEN=
 CF_WORKER_NAME=vehicle-lens
 CF_D1_DATABASE_NAME=vehicle-lens-db
 CF_D1_DATABASE_ID=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.6-flash
+GEMINI_SEARCH_GROUNDING=false
+GEMINI_DEBUG_LOG=false
+CF_AI_GATEWAY_ACCOUNT_ID=
+CF_AI_GATEWAY_ID=
+CF_AI_GATEWAY_TOKEN=
 ```
 
 `.env` 已被 Git 忽略，不会进入版本库。可提交的字段模板位于 `.env.example`。
+线上还需要把 `GEMINI_API_KEY` 保存为 Worker Secret；普通 `.env` 不会自动上传密钥：
+
+```bash
+CLOUDFLARE_API_TOKEN='' npx wrangler secret put GEMINI_API_KEY --env-file /dev/null
+```
+
+`GEMINI_SEARCH_GROUNDING` 默认是 `false`：Gemini 不调用 Google Search，所有模型补充
+内容统一标记为 `unverified`，也不返回网页引用。设置为 `true` 后才启用 Google Search
+Grounding，并允许有引用支持的字段标记为 `inferred`；该模式需要对应的搜索额度或计费。
+
+本地排查 Gemini 请求时可设置 `GEMINI_DEBUG_LOG=true`。终端会输出
+`[vin:gemini:request]` 日志，其中包含请求地址、脱敏 VIN、提示词、模型和结构化输出参数；
+API Key、AI Gateway Token 与 VIN 第12–17位不会写入日志。
+
+配置 `CF_AI_GATEWAY_ID` 后，Gemini 请求会通过 Cloudflare AI Gateway 的
+Google AI Studio provider-native endpoint 发出；`CF_AI_GATEWAY_ACCOUNT_ID` 未填写时使用
+`CLOUDFLARE_ACCOUNT_ID`。仅当 Gateway 开启 Authenticated Gateway 时才需要设置
+`CF_AI_GATEWAY_TOKEN`，并应将它保存为 Worker Secret：
+
+```bash
+CLOUDFLARE_API_TOKEN='' npx wrangler secret put CF_AI_GATEWAY_TOKEN --env-file /dev/null
+```
 
 ### 2. 检查凭据并生成生产配置
 

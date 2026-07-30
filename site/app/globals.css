@@ -23,8 +23,27 @@ button, select { cursor: pointer; }
 }
 .brand { display: flex; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; font-weight: 750; letter-spacing: -.02em; }
 .brand-mark { display: grid; place-items: center; width: 31px; height: 31px; background: var(--ink); color: var(--lime); font: 800 16px/1 Arial; transform: skew(-8deg); }
-.data-pill { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
-.data-pill i { width: 7px; height: 7px; background: #76b900; border-radius: 50%; box-shadow: 0 0 0 4px rgba(118,185,0,.12); }
+.topbar-tools { display: flex; align-items: center; gap: 18px; }
+.language-switcher { display: flex; padding: 2px; border: 1px solid var(--line); background: rgba(255,255,255,.62); }
+.language-switcher button { min-width: 34px; border: 0; padding: 5px 7px; background: transparent; color: var(--muted); font-size: 9px; font-weight: 750; }
+.language-switcher button:hover { color: var(--ink); }
+.language-switcher button.active { background: var(--navy); color: var(--lime); }
+.language-switcher button:focus-visible { outline: 2px solid #779d00; outline-offset: 1px; }
+
+.lookup-workspace { padding-top: 30px; }
+.lookup-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 1184px; margin: 0 auto; border: 1px solid var(--line); background: white; }
+.lookup-tabs button { position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 13px; min-width: 0; padding: 18px 22px; border: 0; border-right: 1px solid var(--line); background: white; color: var(--ink); text-align: left; transition: background .18s ease, color .18s ease; }
+.lookup-tabs button:last-child { border-right: 0; }
+.lookup-tabs button:hover { background: #f7f9f1; }
+.lookup-tabs button::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 4px; background: transparent; }
+.lookup-tabs button > span { grid-row: 1 / 3; align-self: center; color: #88a91d; font: 750 10px/1 var(--font-geist-mono), monospace; }
+.lookup-tabs strong { font-size: 14px; }
+.lookup-tabs small { margin-top: 4px; color: #7b8789; font-size: 10px; }
+.lookup-tabs button.active { background: var(--navy); color: white; }
+.lookup-tabs button.active::after { background: var(--lime); }
+.lookup-tabs button.active > span { color: var(--lime); }
+.lookup-tabs button.active small { color: #9eabad; }
+.lookup-tabs button:focus-visible { z-index: 1; outline: 3px solid rgba(119,157,0,.35); outline-offset: 2px; }
 
 .hero { max-width: 1240px; margin: auto; padding: 72px 28px 76px; display: grid; grid-template-columns: .86fr 1.14fr; gap: 72px; align-items: center; }
 .eyebrow { color: #66820b; font-size: 11px; letter-spacing: .18em; font-weight: 800; margin: 0 0 19px; }
@@ -39,7 +58,7 @@ h1 em { color: #779d00; font-style: normal; white-space: nowrap; }
 .vin-panel { position: relative; background: var(--navy); color: white; padding: 33px; box-shadow: 18px 18px 0 #dfe4dc; overflow: hidden; }
 .vin-panel::after { content: "VIN"; position: absolute; right: -8px; top: -25px; color: rgba(255,255,255,.035); font-weight: 900; font-size: 132px; letter-spacing: -.08em; pointer-events: none; }
 .panel-kicker { position: relative; z-index: 1; display: flex; gap: 10px; align-items: center; margin-bottom: 31px; font-size: 13px; font-weight: 700; }
-.panel-kicker span { display: grid; place-items: center; width: 26px; height: 26px; color: var(--ink); background: var(--lime); font-size: 10px; }
+.panel-kicker span { display: grid; place-items: center; min-width: 32px; height: 26px; padding: 0 5px; color: var(--ink); background: var(--lime); font-size: 9px; }
 .vin-panel label { display: block; color: #aeb9bc; font-size: 12px; margin-bottom: 10px; }
 .vin-input-row { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr auto; background: white; padding: 5px; }
 .vin-input-row input { min-width: 0; border: 0; outline: 0; padding: 16px 14px; background: white; color: var(--ink); caret-color: var(--ink); font-family: var(--font-geist-mono), monospace; font-size: 15px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; -webkit-text-fill-color: var(--ink); }
@@ -66,8 +85,35 @@ h1 em { color: #779d00; font-style: normal; white-space: nowrap; }
 .decode-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px; }
 .decode-grid span { color: #87969a; font-size: 10px; padding: 10px; background: rgba(255,255,255,.045); }
 .decode-grid strong { display: block; color: white; font-size: 12px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-enrichment { margin-top: 14px; padding: 15px; border: 1px solid rgba(200,244,61,.28); background: rgba(200,244,61,.07); }
+.ai-enrichment.loading { color: #b8c3c5; }
+.ai-enrichment.error { border-color: rgba(255,101,101,.35); background: rgba(255,80,80,.08); color: #ffb8b8; }
+.ai-enrichment.loading > span, .ai-enrichment.error > span { color: var(--lime); font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+.ai-enrichment.loading p, .ai-enrichment.error p { margin: 7px 0 0; font-size: 10px; line-height: 1.5; }
+.ai-enrichment-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.ai-enrichment-heading span { color: var(--lime); font-size: 10px; font-weight: 800; letter-spacing: .06em; }
+.ai-enrichment-heading b { color: #aeb9bc; font-size: 9px; font-weight: 600; }
+.ai-vehicle-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin-top: 12px; }
+.ai-vehicle-grid span { min-width: 0; padding: 9px; background: rgba(0,0,0,.13); color: #849397; font-size: 9px; }
+.ai-vehicle-grid strong { display: block; margin-top: 5px; overflow: hidden; color: #f0f4f4; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.ai-evidence { margin: 12px 0 0; color: #bdc7c9; font-size: 9px; line-height: 1.55; }
+.ai-candidates { margin-top: 14px; padding-top: 13px; border-top: 1px solid rgba(255,255,255,.1); }
+.ai-candidates-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-candidates-title strong { color: white; font-size: 10px; }
+.ai-candidates-title span { color: #829094; font-size: 8px; }
+.ai-candidate-list { display: grid; gap: 7px; margin-top: 9px; }
+.ai-candidate-list article { padding: 11px 12px; background: rgba(0,0,0,.17); border-left: 2px solid #8eaa33; }
+.ai-candidate-list article > div { display: flex; align-items: center; gap: 8px; }
+.ai-candidate-list article > div b { color: var(--lime); font: 700 8px/1 var(--font-geist-mono), monospace; }
+.ai-candidate-list article > div strong { min-width: 0; color: #f2f5f5; font-size: 11px; }
+.ai-candidate-list article > div span { margin-left: auto; color: #aeb9bc; font-size: 8px; white-space: nowrap; }
+.ai-candidate-list article p { margin: 7px 0 0; color: #aeb9bc; font-size: 9px; }
+.ai-candidate-list article small { display: block; margin-top: 6px; color: #c8d2d3; font-size: 8px; }
+.ai-candidate-list article em { display: block; margin-top: 7px; color: #849397; font-size: 8px; font-style: normal; line-height: 1.5; }
+.ai-enrichment > small { display: block; margin-top: 7px; color: #7f8e92; font-size: 8px; line-height: 1.5; }
 
 .manual-section { background: white; padding: 70px max(28px, calc((100vw - 1184px)/2)); }
+.manual-error { margin: 0; color: #8c2323 !important; background: #fff1f1 !important; }
 .section-title { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 30px; }
 .section-title .eyebrow { margin-bottom: 8px; }
 .section-title h2 { margin: 0; font-size: 34px; letter-spacing: -.045em; }
@@ -98,6 +144,38 @@ h1 em { color: #779d00; font-style: normal; white-space: nowrap; }
 .pattern-header h3 { margin: 0; font-size: 27px; letter-spacing: -.035em; }
 .coverage-badge { padding: 8px 11px; border: 1px solid rgba(200,244,61,.42); color: var(--lime); font: 700 10px/1 var(--font-geist-mono), monospace; }
 .pattern-loading { display: grid; place-items: center; min-height: 160px; color: #a9b4b6; font-size: 12px; }
+.vin-anatomy-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 15px; background: #0d1b1f; border: 1px solid rgba(255,255,255,.1); }
+.vin-anatomy-heading > span { color: var(--lime); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.vin-anatomy-heading p { margin: 0; color: #849296; font-size: 9px; }
+.vin-anatomy-heading p b { color: var(--lime); }
+.vin-anatomy-scroll { overflow-x: auto; margin-top: 10px; padding-bottom: 4px; scrollbar-color: #506064 #102024; scrollbar-width: thin; }
+.vin-anatomy { min-width: 900px; padding: 20px 22px 16px; background: #102024; border: 1px solid rgba(255,255,255,.1); }
+.vin-anatomy-labels, .vin-character-row { display: grid; grid-template-columns: repeat(17, minmax(0, 1fr)); gap: 6px; }
+.vin-anatomy-labels { min-height: 77px; color: #9ca9ac; }
+.vin-label { position: relative; display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.vin-label strong { color: var(--lime); font: 750 9px/1 var(--font-geist-mono), monospace; }
+.vin-label span { font-size: 9px; letter-spacing: .04em; }
+.vin-anatomy-labels.top .vin-label { align-self: end; padding-bottom: 32px; }
+.vin-anatomy-labels.bottom .vin-label { align-self: start; padding-top: 32px; }
+.vin-anatomy-labels.top .vin-label.range::after { content: ""; position: absolute; right: 2px; bottom: 0; left: 2px; height: 22px; border: 1px solid #91ad37; border-bottom: 0; }
+.vin-anatomy-labels.bottom .vin-label.range::before { content: ""; position: absolute; top: 0; right: 2px; left: 2px; height: 22px; border: 1px solid #91ad37; border-top: 0; }
+.vin-anatomy-labels.top .vin-label.point::after { content: ""; position: absolute; bottom: 0; left: 50%; height: 24px; border-left: 1px solid #91ad37; }
+.vin-anatomy-labels.bottom .vin-label.point::before { content: ""; position: absolute; top: 0; left: 50%; height: 24px; border-left: 1px solid #91ad37; }
+.vin-anatomy-labels.top .vin-label.point::before, .vin-anatomy-labels.bottom .vin-label.point::after { content: ""; position: absolute; left: calc(50% - 3px); width: 6px; height: 6px; background: var(--lime); border-radius: 50%; }
+.vin-anatomy-labels.top .vin-label.point::before { bottom: 22px; }
+.vin-anatomy-labels.bottom .vin-label.point::after { top: 22px; }
+.annotation-wmi { grid-column: 1 / 4; }
+.annotation-vds { grid-column: 4 / 9; }
+.annotation-check { grid-column: 9 / 10; }
+.annotation-year { grid-column: 10 / 11; }
+.annotation-plant { grid-column: 11 / 12; }
+.annotation-serial { grid-column: 12 / 18; }
+.vin-character { position: relative; display: grid; place-items: center; height: 62px; border: 1px solid rgba(255,255,255,.17); background: #172a30; }
+.vin-character small { position: absolute; top: 5px; left: 7px; color: #647478; font: 650 7px/1 var(--font-geist-mono), monospace; }
+.vin-character strong { color: #edf2f2; font: 750 22px/1 var(--font-geist-mono), monospace; }
+.vin-character.known { border-color: rgba(200,244,61,.58); background: rgba(200,244,61,.09); }
+.vin-character.known small, .vin-character.known strong { color: var(--lime); }
+.vin-character.unknown strong { color: #839195; }
 .pattern-code-block { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; padding: 22px 24px; background: #0d1b1f; border: 1px solid rgba(255,255,255,.1); }
 .pattern-caption { color: #849296; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .pattern-code-block strong { color: var(--lime); font: 650 clamp(24px, 3vw, 38px)/1 var(--font-geist-mono), monospace; letter-spacing: .16em; text-align: center; white-space: nowrap; }
@@ -150,6 +228,9 @@ h1 em { color: #779d00; font-style: normal; white-space: nowrap; }
 .vehicle-image-gallery img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
 .vehicle-image-info { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding: 34px; }
 .vehicle-image-info > span { color: #789a0e; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
+.inferred-image-notice { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px 11px; border-left: 3px solid #9fca1a; background: #f1f6df; color: #657173; }
+.inferred-image-notice b { flex: 0 0 auto; padding: 3px 5px; background: var(--navy); color: var(--lime); font-size: 8px; letter-spacing: .08em; }
+.inferred-image-notice p { margin: 0; font-size: 9px; line-height: 1.55; }
 .vehicle-image-info > strong { margin-top: 11px; font-size: 22px; line-height: 1.25; letter-spacing: -.025em; }
 .vehicle-image-info > p { display: -webkit-box; margin: 16px 0 0; overflow: hidden; color: #748083; font-size: 11px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .vehicle-image-credit { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 25px; padding-top: 15px; border-top: 1px solid var(--line); color: #849092; font-size: 9px; }
@@ -182,6 +263,7 @@ footer span { color: var(--ink); font-weight: 700; }
 footer p { margin: 0; }
 
 @media (max-width: 900px) {
+  .lookup-tabs { margin-right: 28px; margin-left: 28px; }
   .hero { grid-template-columns: 1fr; gap: 45px; padding-top: 50px; }
   .select-grid { grid-template-columns: repeat(2, 1fr); }
   .select-box { border-bottom: 1px solid var(--line); }
@@ -199,7 +281,13 @@ footer p { margin: 0; }
 @media (max-width: 600px) {
   .topbar { height: 64px; padding: 0 18px; }
   .brand span:last-child { font-size: 13px; }
-  .data-pill { font-size: 0; }
+  .topbar-tools { gap: 10px; }
+  .language-switcher button { min-width: 29px; padding: 5px 4px; }
+  .lookup-workspace { padding-top: 18px; }
+  .lookup-tabs { margin-right: 18px; margin-left: 18px; }
+  .lookup-tabs button { grid-template-columns: auto 1fr; padding: 14px 13px; column-gap: 9px; }
+  .lookup-tabs small { display: none; }
+  .lookup-tabs button > span { grid-row: auto; }
   .hero { padding: 45px 18px 55px; }
   h1 { font-size: 48px; }
   .stats { gap: 25px; }
@@ -208,6 +296,9 @@ footer p { margin: 0; }
   .vin-input-row button { padding: 14px; }
   .vin-tools { align-items: flex-start; flex-direction: column; }
   .decode-grid { grid-template-columns: repeat(2, 1fr); }
+  .ai-vehicle-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ai-enrichment-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .ai-candidates-title { align-items: flex-start; flex-direction: column; gap: 4px; }
   .manual-section { padding: 52px 18px; }
   .section-title { align-items: start; flex-direction: column; gap: 4px; }
   .select-grid { grid-template-columns: 1fr; }
@@ -217,6 +308,8 @@ footer p { margin: 0; }
   .vin-guide-section { padding: 28px 18px 30px; }
   .pattern-panel { padding: 23px 18px; }
   .pattern-header, .meaning-title { align-items: start; flex-direction: column; gap: 8px; }
+  .vin-anatomy-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .vin-anatomy { min-width: 820px; padding-right: 16px; padding-left: 16px; }
   .pattern-code-block strong { font-size: clamp(17px, 5.4vw, 26px); letter-spacing: .08em; }
   .pattern-sequence { grid-template-columns: repeat(3, 1fr); }
   .pattern-chunk { border-bottom: 1px solid rgba(255,255,255,.1); }
@@ -233,6 +326,7 @@ footer p { margin: 0; }
 
 @media (max-width: 420px) {
   h1 { font-size: 41px; }
+  .brand span:last-child { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

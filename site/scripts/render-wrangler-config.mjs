@@ -25,6 +25,13 @@ const config = {
     binding: "ASSETS",
   },
   images: { binding: "IMAGES" },
+  vars: {
+    GEMINI_MODEL: process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
+    GEMINI_SEARCH_GROUNDING: process.env.GEMINI_SEARCH_GROUNDING?.trim() || "false",
+    GEMINI_DEBUG_LOG: process.env.GEMINI_DEBUG_LOG?.trim() || "false",
+    CF_AI_GATEWAY_ACCOUNT_ID: process.env.CF_AI_GATEWAY_ACCOUNT_ID?.trim() || process.env.CLOUDFLARE_ACCOUNT_ID,
+    CF_AI_GATEWAY_ID: process.env.CF_AI_GATEWAY_ID?.trim() || "",
+  },
   d1_databases: [
     {
       binding: "DB",

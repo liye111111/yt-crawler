@@ -1,0 +1,37 @@
+# Vehicle Lens
+
+> Vehicle Lens is a free multilingual web tool for VIN decoding and manual vehicle identification by year, make, model, trim, and engine.
+
+Vehicle Lens combines NHTSA vPIC data, a five-level vehicle-fitment database, AI-assisted interpretation, and Wikimedia Commons reference images. The interface supports Chinese, English, and Japanese.
+
+## Primary page
+
+- [Vehicle Lens VIN Decoder and Vehicle Lookup](https://vin.carmodelx.com/): Decode a 17-character VIN or manually select Year, Make, Model, Trim, and Engine.
+
+## Core capabilities
+
+- VIN decoding: Uses the public NHTSA vPIC API to return model year, make, model, body class, engine, fuel, manufacturing, and related fields when available.
+- Manual vehicle lookup: Uses a hierarchical Year → Make → Model → Trim → Engine dataset.
+- AI assistance: Suggests possible interpretations only when authoritative VIN fields are missing. AI-generated values are labeled as inferred or unverified.
+- VIN field guide: Explains WMI positions 1–3, VDS positions 4–8, check digit position 9, model year position 10, plant position 11, and serial positions 12–17.
+- Vehicle images: Retrieves licensed reference images from Wikimedia Commons; an image is illustrative and does not prove an exact VIN match.
+
+## Data sources
+
+- [NHTSA vPIC](https://vpic.nhtsa.dot.gov/api/): Official United States vehicle product information and VIN decoding API.
+- [Wikimedia Commons](https://commons.wikimedia.org/): Reference vehicle images with source and license attribution.
+- Local vehicle database: Five-level vehicle combinations collected for vehicle-fitment lookup.
+
+## Important limitations
+
+- AI output is supplementary and must not be treated as manufacturer certification or proof of vehicle identity.
+- A VIN character can be known while its manufacturer-specific meaning remains unpublished.
+- Manual model selection cannot determine a real vehicle serial number, exact assembly plant, ownership, accident history, registration, mileage, or market price.
+- Reference images may depict the same model family rather than the exact trim, engine, market, or production year.
+
+## Crawling and canonical information
+
+- Canonical site: https://vin.carmodelx.com/
+- Sitemap: https://vin.carmodelx.com/sitemap.xml
+- Robots policy: https://vin.carmodelx.com/robots.txt
+- Preferred language is selected in the interface; content is available in Chinese, English, and Japanese on the canonical page.

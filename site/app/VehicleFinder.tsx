@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Locale, translate } from "./i18n";
 
 type Catalog = {
   vehiclePaths: number;
@@ -70,8 +71,43 @@ type ManualDetails = {
   vehicleType: string | null;
   dimensions: Record<string, string>;
 };
+type AiEnrichment = {
+  vin: string;
+  source: "gemini-model" | "gemini-google-search";
+  searchGrounding: boolean;
+  summary: string;
+  vehicle: {
+    manufacturer: string | null;
+    make: string | null;
+    model: string | null;
+    modelYear: string | null;
+    trim: string | null;
+    bodyClass: string | null;
+    engine: string | null;
+    displacementLiters: string | null;
+    fuelType: string | null;
+    evidence: string;
+    status: "inferred" | "unverified";
+    confidence: "low" | "medium" | "high";
+  };
+  modelCandidates: {
+    make: string | null;
+    model: string;
+    platform: string | null;
+    modelYear: string | null;
+    bodyClass: string | null;
+    possibleTrims: string[];
+    reason: string;
+    status: "inferred" | "unverified";
+    confidence: "low" | "medium" | "high";
+  }[];
+  disclaimer: string;
+};
 
 const NONE = "__none__";
+class ApiError extends Error {
+  constructor(readonly code: string) { super(code); }
+}
 const normalize = (value: string | null) =>
   (value ?? "").toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -84,7 +120,7 @@ async function api<T>(path: string, params?: Record<string, string>) {
   const query = params ? `?${new URLSearchParams(params)}` : "";
   const response = await fetch(`${path}${query}`);
   const body = await response.json();
-  if (!response.ok || !body.ok) throw new Error(body.error?.message ?? "车型查询失败");
+  if (!response.ok || !body.ok) throw new ApiError(body.error?.code ?? "UNKNOWN");
   return body.data as T;
 }
 
@@ -93,6 +129,8 @@ async function options(path: string, params: Record<string, string>) {
 }
 
 export function VehicleFinder() {
+  const [locale, setLocale] = useState<Locale>("zh");
+  const [lookupMode, setLookupMode] = useState<"vin" | "manual">("vin");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [year, setYear] = useState("");
   const [make, setMake] = useState("");
@@ -111,6 +149,9 @@ export function VehicleFinder() {
   const [decoded, setDecoded] = useState<Decoded | null>(null);
   const [decodedVin, setDecodedVin] = useState("");
   const [matchNote, setMatchNote] = useState("");
+  const [aiEnrichment, setAiEnrichment] = useState<AiEnrichment | null>(null);
+  const [aiEnrichmentLoading, setAiEnrichmentLoading] = useState(false);
+  const [aiEnrichmentError, setAiEnrichmentError] = useState("");
   const [vinPattern, setVinPattern] = useState<VinPattern | null>(null);
   const [patternLoading, setPatternLoading] = useState(false);
   const [vehicleImages, setVehicleImages] = useState<VehicleImage[]>([]);
@@ -119,11 +160,34 @@ export function VehicleFinder() {
   const [imageSearched, setImageSearched] = useState(false);
   const [manualDetails, setManualDetails] = useState<ManualDetails | null>(null);
   const [manualDetailsLoading, setManualDetailsLoading] = useState(false);
+  const enrichmentCache = useRef(new Map<string, AiEnrichment>());
+  const enrichmentRequest = useRef<{ key: string; id: number } | null>(null);
+  const enrichmentSequence = useRef(0);
+  const t = (key: string) => translate(locale, key);
+  const errorText = (cause: unknown, fallbackKey: string) => {
+    const key = cause instanceof ApiError ? `error_${cause.code}` : fallbackKey;
+    const translated = t(key);
+    return translated === key ? t(fallbackKey) : translated;
+  };
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("vehicle-lens-locale");
+    const browser = navigator.language.toLowerCase();
+    const next: Locale = saved === "en" || saved === "ja" || saved === "zh"
+      ? saved
+      : browser.startsWith("ja") ? "ja" : browser.startsWith("en") ? "en" : "zh";
+    setLocale(next);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("vehicle-lens-locale", locale);
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "ja" ? "ja" : "en";
+  }, [locale]);
 
   useEffect(() => {
     api<Catalog>("/api/vehicles/catalog")
       .then(setCatalog)
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "车型数据库加载失败"));
+      .catch((cause) => setError(errorText(cause, "error_database")));
   }, []);
 
   function clearAfter(level: "year" | "make" | "model" | "trim") {
@@ -140,7 +204,7 @@ export function VehicleFinder() {
     try {
       const items = (await options("/api/vehicles/makes", { year: value })).filter((item): item is string => item !== null);
       setMakes(items); return items;
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "品牌加载失败"); return []; }
+    } catch (cause) { setError(errorText(cause, "error_vehicleQuery")); return []; }
     finally { setQueryLoading(false); }
   }
 
@@ -174,17 +238,28 @@ export function VehicleFinder() {
     };
   }, [year, make, model, trim, engine]);
 
-  const patternVehicle = useMemo(() => result ?? (
-    decodedVin && decoded?.year && decoded.make && decoded.model
-      ? { year: String(decoded.year), make: decoded.make, model: decoded.model, trim: decoded.trim, engine: null }
+  const patternVehicle = useMemo(() => lookupMode === "manual" ? result : (
+    decodedVin && (decoded?.year || aiEnrichment?.vehicle.modelYear) && (decoded?.make || aiEnrichment?.vehicle.make) && (decoded?.model || aiEnrichment?.vehicle.model)
+      ? {
+          year: String(decoded?.year || aiEnrichment?.vehicle.modelYear),
+          make: decoded?.make || aiEnrichment?.vehicle.make as string,
+          model: decoded?.model || aiEnrichment?.vehicle.model as string,
+          trim: decoded?.trim || aiEnrichment?.vehicle.trim,
+          engine: aiEnrichment?.vehicle.engine ?? null,
+        }
       : null
-  ), [result, decodedVin, decoded]);
-
-  function clearNhtsaResult() {
-    setDecoded(null);
-    setDecodedVin("");
-    setMatchNote("");
-  }
+  ), [lookupMode, result, decodedVin, decoded, aiEnrichment]);
+  const imageVehicle = useMemo(() => {
+    if (lookupMode === "manual") {
+      return year && make && model ? { year: Number(year), make, model, inferred: false } : null;
+    }
+    const candidate = aiEnrichment?.modelCandidates[0] ?? null;
+    const imageYear = decoded?.year || Number(aiEnrichment?.vehicle.modelYear || candidate?.modelYear) || null;
+    const imageMake = decoded?.make || aiEnrichment?.vehicle.make || candidate?.make;
+    const imageModel = decoded?.model || aiEnrichment?.vehicle.model || candidate?.model;
+    if (!imageYear || !imageMake || !imageModel) return null;
+    return { year: imageYear, make: imageMake, model: imageModel, inferred: !decoded?.model };
+  }, [lookupMode, year, make, model, decoded, aiEnrichment]);
 
   useEffect(() => {
     if (!patternVehicle) { setVinPattern(null); setPatternLoading(false); return; }
@@ -194,23 +269,29 @@ export function VehicleFinder() {
     fetch("/api/vin/pattern", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...patternVehicle, vin: decodedVin || null, decoded: decodedVin ? decoded : null }),
+      body: JSON.stringify({
+        ...patternVehicle,
+        locale,
+        vin: lookupMode === "vin" ? decodedVin || null : null,
+        decoded: lookupMode === "vin" && decodedVin ? decoded : null,
+      }),
       signal: controller.signal,
     })
       .then(async (response) => {
         const payload = await response.json();
-        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? "VIN 伪码生成失败");
+        if (!response.ok || !payload.ok) throw new ApiError(payload.error?.code ?? "VIN_PATTERN_UNAVAILABLE");
         setVinPattern(payload.data as VinPattern);
       })
       .catch((cause) => {
-        if (cause instanceof Error && cause.name !== "AbortError") setError(cause.message);
+        if (cause instanceof Error && cause.name !== "AbortError") setError(errorText(cause, "error_VIN_PATTERN_UNAVAILABLE"));
       })
       .finally(() => { if (!controller.signal.aborted) setPatternLoading(false); });
     return () => controller.abort();
-  }, [patternVehicle, decodedVin, decoded]);
+  }, [locale, lookupMode, patternVehicle, decodedVin, decoded]);
 
   useEffect(() => {
-    if (decodedVin || vinLoading || !year || !make || !model) {
+    if (lookupMode !== "manual") return;
+    if (!year || !make || !model) {
       setManualDetails(null); setManualDetailsLoading(false); return;
     }
     const controller = new AbortController();
@@ -219,7 +300,7 @@ export function VehicleFinder() {
     fetch(`/api/vehicles/details?${params}`, { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
-        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? "车型详情加载失败");
+        if (!response.ok || !payload.ok) throw new ApiError(payload.error?.code ?? "VEHICLE_DETAILS_UNAVAILABLE");
         setManualDetails(payload.data as ManualDetails);
       })
       .catch((cause) => {
@@ -227,26 +308,23 @@ export function VehicleFinder() {
       })
       .finally(() => { if (!controller.signal.aborted) setManualDetailsLoading(false); });
     return () => controller.abort();
-  }, [year, make, model, decodedVin, vinLoading]);
+  }, [lookupMode, year, make, model]);
 
   useEffect(() => {
-    const imageYear = decodedVin ? decoded?.year : Number(year) || null;
-    const imageMake = decodedVin ? decoded?.make : make;
-    const imageModel = decodedVin ? decoded?.model : model;
-    if (!imageYear || !imageMake || !imageModel) {
+    if (!imageVehicle) {
       setVehicleImages([]); setSelectedImageIndex(0); setImageLoading(false); setImageSearched(false); return;
     }
     const controller = new AbortController();
     const params = new URLSearchParams({
-      year: String(imageYear),
-      make: imageMake,
-      model: imageModel,
+      year: String(imageVehicle.year),
+      make: imageVehicle.make,
+      model: imageVehicle.model,
     });
     setVehicleImages([]); setSelectedImageIndex(0); setImageLoading(true); setImageSearched(false);
     fetch(`/api/vehicles/image?${params}`, { signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
-        if (!response.ok || !payload.ok) throw new Error(payload.error?.message ?? "图片查询失败");
+        if (!response.ok || !payload.ok) throw new ApiError(payload.error?.code ?? "IMAGE_LOOKUP_UNAVAILABLE");
         setVehicleImages((payload.data.images ?? []) as VehicleImage[]);
       })
       .catch((cause) => {
@@ -256,36 +334,74 @@ export function VehicleFinder() {
         if (!controller.signal.aborted) { setImageLoading(false); setImageSearched(true); }
       });
     return () => controller.abort();
-  }, [decodedVin, decoded?.year, decoded?.make, decoded?.model, year, make, model]);
+  }, [imageVehicle]);
+
+  async function enrichVinValue(requestedVin: string, requestedLocale: Locale = locale) {
+    const requestKey = `${requestedVin}:${requestedLocale}`;
+    const cached = enrichmentCache.current.get(requestKey);
+    if (cached) { setAiEnrichment(cached); setAiEnrichmentError(""); setAiEnrichmentLoading(false); return; }
+    if (enrichmentRequest.current?.key === requestKey) return;
+    const requestId = ++enrichmentSequence.current;
+    enrichmentRequest.current = { key: requestKey, id: requestId };
+    setAiEnrichment(null); setAiEnrichmentError(""); setAiEnrichmentLoading(true);
+    try {
+      const response = await fetch("/api/vin/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vin: requestedVin, locale: requestedLocale }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new ApiError(payload.error?.code ?? "GEMINI_UNAVAILABLE");
+      const enrichment = payload.data as AiEnrichment;
+      enrichmentCache.current.set(requestKey, enrichment);
+      if (enrichmentRequest.current?.id === requestId) setAiEnrichment(enrichment);
+    } catch (cause) {
+      if (enrichmentRequest.current?.id === requestId) {
+        const key = cause instanceof ApiError ? `error_${cause.code}` : "error_GEMINI_UNAVAILABLE";
+        const translated = translate(requestedLocale, key);
+        setAiEnrichmentError(translated === key ? translate(requestedLocale, "error_GEMINI_UNAVAILABLE") : translated);
+      }
+    } finally {
+      if (enrichmentRequest.current?.id === requestId) {
+        enrichmentRequest.current = null;
+        setAiEnrichmentLoading(false);
+      }
+    }
+  }
+
+  function changeLocale(nextLocale: Locale) {
+    if (nextLocale === locale) return;
+    setLocale(nextLocale);
+    if (decodedVin) void enrichVinValue(decodedVin, nextLocale);
+  }
 
   async function decodeVinValue(requestedVin: string) {
-    setError(""); setDecoded(null); setDecodedVin(""); setMatchNote(""); setVinLoading(true);
+    setError(""); setDecoded(null); setDecodedVin(""); setMatchNote(""); setAiEnrichment(null); setAiEnrichmentError(""); setVinLoading(true);
     try {
       const body = await fetch("/api/vin/decode", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vin: requestedVin }),
       });
       const payload = await body.json();
-      if (!body.ok || !payload.ok) throw new Error(payload.error?.message ?? "VIN 解析失败");
+      if (!body.ok || !payload.ok) throw new ApiError(payload.error?.code ?? "VIN_UNAVAILABLE");
       const vehicle = payload.data.decoded as Decoded;
       setDecoded(vehicle);
       setDecodedVin(payload.data.vin);
-      if (!vehicle.year) { setMatchNote("VIN 未返回有效年份，请使用手动查询。"); return; }
+      void enrichVinValue(payload.data.vin, locale);
+      if (!vehicle.year) { setMatchNote(t("noVinYear")); return; }
       const selectedYear = String(vehicle.year);
-      const makeItems = await chooseYear(selectedYear);
+      const makeItems = (await options("/api/vehicles/makes", { year: selectedYear })).filter((item): item is string => item !== null);
       const matchedMake = findName(makeItems, vehicle.make) ?? "";
-      if (!matchedMake) { setMatchNote("已识别年份，但本地库没有对应品牌。"); return; }
-      const modelItems = await chooseMake(matchedMake, selectedYear);
+      if (!matchedMake) { setMatchNote(t("noLocalMake")); return; }
+      const modelItems = (await options("/api/vehicles/models", { year: selectedYear, make: matchedMake })).filter((item): item is string => item !== null);
       const matchedModel = findName(modelItems, vehicle.model) ?? "";
-      if (!matchedModel) { setMatchNote("已匹配到品牌，请手动确认车系。"); return; }
-      const trimItems = await chooseModel(matchedModel, selectedYear, matchedMake);
+      if (!matchedModel) { setMatchNote(t("noLocalModel")); return; }
+      const trimItems = await options("/api/vehicles/trims", { year: selectedYear, make: matchedMake, model: matchedModel });
       const matchedTrim = vehicle.trim
         ? findName(trimItems, vehicle.trim)
         : trimItems.includes(null) ? NONE : null;
-      if (matchedTrim !== null) await chooseTrim(matchedTrim, selectedYear, matchedMake, matchedModel);
-      const level = matchedTrim !== null ? "配置款" : "车系";
-      setMatchNote(`已自动匹配到${level}，你可以继续确认下方候选项。`);
+      setMatchNote(t(matchedTrim !== null ? "localTrimMatched" : "localModelMatched"));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "VIN 解析失败");
+      setError(errorText(cause, "error_VIN_UNAVAILABLE"));
     } finally { setVinLoading(false); }
   }
 
@@ -301,13 +417,12 @@ export function VehicleFinder() {
       const response = await fetch("/api/vin/random", { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
-        throw new Error(payload.error?.message ?? "随机 VIN 获取失败");
+        throw new ApiError(payload.error?.code ?? "RANDOM_VIN_UNAVAILABLE");
       }
       setVin(payload.data.vin);
       await decodeVinValue(payload.data.vin);
     } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : "请求失败";
-      setError(`无法获取随机 VIN：${detail}`);
+      setError(errorText(cause, "error_RANDOM_VIN_UNAVAILABLE"));
     } finally {
       setRandomVinLoading(false);
     }
@@ -318,165 +433,211 @@ export function VehicleFinder() {
   const engineOptions = engines.map((item) => item ?? NONE);
   const vehicleImage = vehicleImages[selectedImageIndex] ?? null;
   const manualDimensions = manualDetails?.dimensions ?? {};
-  const specificationGroups = decoded ? [
+  const activeDecoded = lookupMode === "vin" ? decoded : null;
+  const activeResult = lookupMode === "manual" ? result : null;
+  const specificationGroups = activeDecoded ? [
     {
-      title: "基本信息",
+      title: t("basicInfo"),
       items: [
-        ["品牌", decoded.make], ["车系", decoded.model], ["年款", decoded.year],
-        ["配置款", decoded.trim], ["系列", decoded.series], ["车辆类型", decoded.vehicleType],
-        ["车身类型", decoded.bodyClass], ["制造商", decoded.manufacturer],
+        [t("make"), activeDecoded.make], [t("model"), activeDecoded.model], [t("year"), activeDecoded.year],
+        [t("trim"), activeDecoded.trim], [t("series"), activeDecoded.series], [t("vehicleType"), activeDecoded.vehicleType],
+        [t("body"), activeDecoded.bodyClass], [t("manufacturer"), activeDecoded.manufacturer],
       ],
     },
     {
-      title: "动力与传动",
+      title: t("powertrain"),
       items: [
-        ["排量", decoded.displacementLiters ? `${decoded.displacementLiters} L` : null],
-        ["气缸数", decoded.cylinders], ["发动机布局", decoded.engineConfiguration],
-        ["发动机型号", decoded.engineModel], ["发动机功率", decoded.horsepower ? `${decoded.horsepower} hp` : null],
-        ["主要燃料", decoded.fuelType], ["辅助燃料", decoded.fuelTypeSecondary],
-        ["电气化类型", decoded.electrificationLevel], ["驱动形式", decoded.driveType],
-        ["变速器", decoded.transmissionStyle], ["变速器挡位", decoded.transmissionSpeeds],
+        [t("displacement"), activeDecoded.displacementLiters ? `${activeDecoded.displacementLiters} L` : null],
+        [t("cylinders"), activeDecoded.cylinders], [t("engineLayout"), activeDecoded.engineConfiguration],
+        [t("engineModel"), activeDecoded.engineModel], [t("horsepower"), activeDecoded.horsepower ? `${activeDecoded.horsepower} hp` : null],
+        [t("primaryFuel"), activeDecoded.fuelType], [t("secondaryFuel"), activeDecoded.fuelTypeSecondary],
+        [t("electrification"), activeDecoded.electrificationLevel], [t("driveType"), activeDecoded.driveType],
+        [t("transmission"), activeDecoded.transmissionStyle], [t("transmissionSpeeds"), activeDecoded.transmissionSpeeds],
       ],
     },
     {
-      title: "车身与制造",
+      title: t("bodyManufacturing"),
       items: [
-        ["车门数", decoded.doors], ["座位数", decoded.seats], ["制动系统", decoded.brakeSystemType],
-        ["总质量等级", decoded.gvwr], ["生产国家", decoded.plantCountry],
-        ["生产州/省", decoded.plantState], ["生产城市", decoded.plantCity],
+        [t("doors"), activeDecoded.doors], [t("seats"), activeDecoded.seats], [t("brakes"), activeDecoded.brakeSystemType],
+        [t("gvwr"), activeDecoded.gvwr], [t("plantCountry"), activeDecoded.plantCountry],
+        [t("plantState"), activeDecoded.plantState], [t("plantCity"), activeDecoded.plantCity],
       ],
     },
-  ] : result ? [
+  ] : activeResult ? [
     {
-      title: "车型信息",
+      title: t("modelInfo"),
       items: [
-        ["品牌", result.make], ["车系", result.model], ["年款", result.year],
-        ["当前配置款", result.trim], ["当前发动机", result.engine],
-        ["NHTSA 车型登记", manualDetails?.nhtsaModelMatched ? "已找到对应车型" : null],
-        ["本地车型组合", manualDetails?.local.paths], ["可选配置款", manualDetails?.local.trims],
-        ["可选发动机", manualDetails?.local.engines],
-      ],
-    },
-    {
-      title: "尺寸与重量",
-      items: [
-        ["车长", manualDimensions.OL ? `${manualDimensions.OL} cm` : null],
-        ["车宽", manualDimensions.OW ? `${manualDimensions.OW} cm` : null],
-        ["车高", manualDimensions.OH ? `${manualDimensions.OH} cm` : null],
-        ["轴距", manualDimensions.WB ? `${manualDimensions.WB} cm` : null],
-        ["整备质量", manualDimensions.CW ? `${manualDimensions.CW} kg` : null],
-        ["前轮距", manualDimensions.TWF ? `${manualDimensions.TWF} cm` : null],
-        ["后轮距", manualDimensions.TWR ? `${manualDimensions.TWR} cm` : null],
-        ["前后配重", manualDimensions.WD],
+        [t("make"), activeResult.make], [t("model"), activeResult.model], [t("year"), activeResult.year],
+        [t("currentTrim"), activeResult.trim], [t("currentEngine"), activeResult.engine],
+        [t("nhtsaRegistration"), manualDetails?.nhtsaModelMatched ? t("nhtsaListed") : null],
+        [t("localPaths"), manualDetails?.local.paths], [t("availableTrims"), manualDetails?.local.trims],
+        [t("availableEngines"), manualDetails?.local.engines],
       ],
     },
     {
-      title: "数据范围",
+      title: t("dimensions"),
       items: [
-        ["车型条件", `${result.year} ${result.make} ${result.model}`],
-        ["规格来源", Object.keys(manualDimensions).length ? "NHTSA Canadian Vehicle Specifications" : null],
-        ["配置来源", "本地五级车型数据库"],
-        ["数据级别", "车型级参考数据"],
+        [t("length"), manualDimensions.OL ? `${manualDimensions.OL} cm` : null],
+        [t("width"), manualDimensions.OW ? `${manualDimensions.OW} cm` : null],
+        [t("height"), manualDimensions.OH ? `${manualDimensions.OH} cm` : null],
+        [t("wheelbase"), manualDimensions.WB ? `${manualDimensions.WB} cm` : null],
+        [t("curbWeight"), manualDimensions.CW ? `${manualDimensions.CW} kg` : null],
+        [t("frontTrack"), manualDimensions.TWF ? `${manualDimensions.TWF} cm` : null],
+        [t("rearTrack"), manualDimensions.TWR ? `${manualDimensions.TWR} cm` : null],
+        [t("weightDistribution"), manualDimensions.WD],
+      ],
+    },
+    {
+      title: t("dataScope"),
+      items: [
+        [t("vehicleCriteria"), `${activeResult.year} ${activeResult.make} ${activeResult.model}`],
+        [t("specSource"), Object.keys(manualDimensions).length ? "NHTSA Canadian Vehicle Specifications" : null],
+        [t("configSource"), t("localDb")],
+        [t("dataLevel"), t("modelData")],
       ],
     },
   ] : [];
-  const showSpecifications = Boolean((decoded && decodedVin) || result);
-  const specificationYear = decodedVin ? decoded?.year : Number(result?.year) || null;
-  const specificationMake = decodedVin ? decoded?.make : result?.make;
-  const specificationModel = decodedVin ? decoded?.model : result?.model;
+  const showSpecifications = Boolean((lookupMode === "vin" && activeDecoded && decodedVin) || activeResult);
+  const specificationYear = imageVehicle?.year ?? (lookupMode === "vin" ? activeDecoded?.year : Number(activeResult?.year) || null);
+  const specificationMake = imageVehicle?.make ?? (lookupMode === "vin" ? activeDecoded?.make : activeResult?.make);
+  const specificationModel = imageVehicle?.model ?? (lookupMode === "vin" ? activeDecoded?.model : activeResult?.model);
 
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="车鉴首页"><span className="brand-mark">V</span><span>车鉴 · Vehicle Lens</span></a>
-        <span className="data-pill"><i /> 本地 D1 · 数据更新至 2026-07-27</span>
+        <a className="brand" href="#top" aria-label={t("brand")}><span className="brand-mark">V</span><span>{t("brand")}</span></a>
+        <div className="topbar-tools"><div className="language-switcher" aria-label="Language">
+          {(["zh", "en", "ja"] as Locale[]).map((item) => <button type="button" className={locale === item ? "active" : ""} onClick={() => changeLocale(item)} aria-pressed={locale === item} key={item}>{item === "zh" ? "中文" : item === "ja" ? "日本語" : "EN"}</button>)}
+        </div></div>
       </header>
 
-      <section className="hero" id="top">
-        <div className="hero-copy">
-          <p className="eyebrow">VEHICLE IDENTITY, RESOLVED</p>
-          <h1>One VIN.<br /><em>Zero guesswork.</em></h1>
-          <p className="hero-text">结合 NHTSA VIN 解码与五级车型数据库，快速定位年款、品牌、车系、配置款和发动机。</p>
-          <div className="stats" aria-label="数据库概览">
-            <div><strong>{catalog ? catalog.vehiclePaths.toLocaleString() : "—"}</strong><span>车型组合</span></div>
-            <div><strong>{catalog ? catalog.years.length : "—"}</strong><span>覆盖年份</span></div>
-            <div><strong>5</strong><span>属性层级</span></div>
-          </div>
+      <section className="lookup-workspace" id="top">
+        <div className="lookup-tabs" role="tablist" aria-label={t("lookupMethods")}>
+          <button id="vin-lookup-tab" type="button" role="tab" aria-selected={lookupMode === "vin"} aria-controls="vin-lookup-panel" className={lookupMode === "vin" ? "active" : ""} onClick={() => { setLookupMode("vin"); setError(""); }}>
+            <span>01</span><strong>{t("vinTab")}</strong><small>{t("vinTabHint")}</small>
+          </button>
+          <button id="manual-lookup-tab" type="button" role="tab" aria-selected={lookupMode === "manual"} aria-controls="manual-lookup-panel" className={lookupMode === "manual" ? "active" : ""} onClick={() => { setLookupMode("manual"); setError(""); }}>
+            <span>02</span><strong>{t("manualTab")}</strong><small>{t("manualTabHint")}</small>
+          </button>
         </div>
 
-        <div className="vin-panel">
-          <div className="panel-kicker"><span>01</span> VIN 智能识别</div>
-          <form onSubmit={decodeVin}>
-            <label htmlFor="vin">输入17位车辆识别码</label>
-            <div className="vin-input-row">
-              <input id="vin" value={vin} onChange={(event) => { setVin(event.target.value.toUpperCase()); setDecoded(null); setDecodedVin(""); }} maxLength={17} placeholder="例如 JTDKN3DU4A0000000" spellCheck={false} />
-              <button disabled={vinLoading || randomVinLoading}>{vinLoading ? "识别中…" : "解析 VIN"}</button>
+        {lookupMode === "vin" ? <section className="hero" id="vin-lookup-panel" role="tabpanel" aria-labelledby="vin-lookup-tab">
+          <div className="hero-copy">
+            <p className="eyebrow">VEHICLE IDENTITY, RESOLVED</p>
+            <h1>One VIN.<br /><em>Zero guesswork.</em></h1>
+            <p className="hero-text">{t("heroText")}</p>
+            <div className="stats" aria-label={t("statsLabel")}>
+              <div><strong>{catalog ? catalog.vehiclePaths.toLocaleString() : "—"}</strong><span>{t("combinations")}</span></div>
+              <div><strong>{catalog ? catalog.years.length : "—"}</strong><span>{t("coveredYears")}</span></div>
+              <div><strong>5</strong><span>{t("levels")}</span></div>
             </div>
-          </form>
-          <div className="vin-tools">
-            <p className="hint">试试示例：<button type="button" onClick={() => setVin("JTDKN3DU4A0000000")}>JTDKN3DU4A0000000</button></p>
-            <button className="random-vin-button" type="button" onClick={fillRandomVin} disabled={randomVinLoading || vinLoading}>
-              <span aria-hidden="true">↻</span>{randomVinLoading ? vinLoading ? "解析中…" : "获取中…" : "随机 VIN"}
-            </button>
           </div>
-          {error && <div className="notice error">{error}</div>}
-          {decoded && <div className="decode-result"><div className="result-heading"><span>解码结果</span><b>{matchNote}</b></div><div className="decode-grid"><span>年份<strong>{decoded.year ?? "未知"}</strong></span><span>品牌<strong>{decoded.make ?? "未知"}</strong></span><span>车系<strong>{decoded.model ?? "未知"}</strong></span><span>车身<strong>{decoded.bodyClass ?? "未知"}</strong></span></div></div>}
-        </div>
-      </section>
 
-      <section className="manual-section">
-        <div className="section-title"><div><p className="eyebrow">MANUAL LOOKUP</p><h2>手动车型查询</h2></div><p>不知道 VIN？按顺序选择车辆属性。</p></div>
-        <div className="finder-card">
-          <div className="select-grid">
-            <Select label="年款" step="01" value={year} disabled={!catalog} onChange={(value) => { clearNhtsaResult(); void chooseYear(value); }} options={yearOptions} loading={queryLoading} />
-            <Select label="品牌" step="02" value={make} disabled={!makes.length} onChange={(value) => { clearNhtsaResult(); void chooseMake(value); }} options={makes} />
-            <Select label="车系" step="03" value={model} disabled={!models.length} onChange={(value) => { clearNhtsaResult(); void chooseModel(value); }} options={models} />
-            <Select label="配置款" step="04" value={trim} disabled={!trims.length} onChange={(value) => void chooseTrim(value)} options={trimOptions} nullLabel="无配置款" />
-            <Select label="发动机" step="05" value={engine} disabled={!engines.length} onChange={setEngine} options={engineOptions} nullLabel="未提供发动机" />
+          <div className="vin-panel">
+            <div className="panel-kicker"><span>VIN</span> {t("vinSmart")}</div>
+            <form onSubmit={decodeVin}>
+              <label htmlFor="vin">{t("vinLabel")}</label>
+              <div className="vin-input-row">
+                <input id="vin" value={vin} onChange={(event) => { setVin(event.target.value.toUpperCase()); setDecoded(null); setDecodedVin(""); setAiEnrichment(null); setAiEnrichmentError(""); }} maxLength={17} placeholder={t("vinPlaceholder")} spellCheck={false} />
+                <button disabled={vinLoading || randomVinLoading}>{vinLoading ? t("decoding") : t("decode")}</button>
+              </div>
+            </form>
+            <div className="vin-tools">
+              <p className="hint">{t("example")}<button type="button" onClick={() => setVin("JTDKN3DU4A0000000")}>JTDKN3DU4A0000000</button></p>
+              <button className="random-vin-button" type="button" onClick={fillRandomVin} disabled={randomVinLoading || vinLoading}>
+                <span aria-hidden="true">↻</span>{randomVinLoading ? vinLoading ? t("decoding") : t("fetching") : t("random")}
+              </button>
+            </div>
+            {error && <div className="notice error">{error}</div>}
+            {decoded && <div className="decode-result">
+              <div className="result-heading"><span>{t("nhtsaResult")}</span><b>{matchNote}</b></div>
+              <div className="decode-grid"><span>{t("year")}<strong>{decoded.year ?? t("unknown")}</strong></span><span>{t("make")}<strong>{decoded.make ?? t("unknown")}</strong></span><span>{t("model")}<strong>{decoded.model ?? t("unknown")}</strong></span><span>{t("body")}<strong>{decoded.bodyClass ?? t("unknown")}</strong></span></div>
+              {aiEnrichmentLoading && <div className="ai-enrichment loading"><span>{t("aiParsing")}</span><p>{t("aiParsingText")}</p></div>}
+              {aiEnrichmentError && <div className="ai-enrichment error"><span>{t("aiFailed")}</span><p>{aiEnrichmentError}</p></div>}
+              {aiEnrichment && <div className="ai-enrichment">
+                <div className="ai-enrichment-heading"><span>{t("aiCandidate")}</span><b>{aiEnrichment.vehicle.status === "inferred" ? t("sourcedInference") : t("unverified")} · {aiEnrichment.vehicle.confidence === "high" ? t("confidenceHigh") : aiEnrichment.vehicle.confidence === "medium" ? t("confidenceMedium") : t("confidenceLow")} {t("confidence")}</b></div>
+                <div className="ai-vehicle-grid">
+                  <span>{t("year")}<strong>{aiEnrichment.vehicle.modelYear ?? t("cannotDetermine")}</strong></span>
+                  <span>{t("make")}<strong>{aiEnrichment.vehicle.make ?? t("cannotDetermine")}</strong></span>
+                  <span>{t("model")}<strong>{aiEnrichment.vehicle.model ?? t("cannotDetermine")}</strong></span>
+                  <span>{t("manufacturer")}<strong>{aiEnrichment.vehicle.manufacturer ?? t("cannotDetermine")}</strong></span>
+                  <span>{t("trim")}<strong>{aiEnrichment.vehicle.trim ?? t("cannotDetermine")}</strong></span>
+                  <span>{t("body")}<strong>{aiEnrichment.vehicle.bodyClass ?? t("cannotDetermine")}</strong></span>
+                  <span>{t("engine")}<strong>{aiEnrichment.vehicle.engine ?? t("cannotDetermine")}</strong></span>
+                  <span>{t("fuel")}<strong>{aiEnrichment.vehicle.fuelType ?? t("cannotDetermine")}</strong></span>
+                </div>
+                <p className="ai-evidence">{aiEnrichment.vehicle.evidence}</p>
+                {aiEnrichment.modelCandidates.length > 0 && <div className="ai-candidates">
+                  <div className="ai-candidates-title"><strong>{t("possibleModels")}</strong><span>{t("candidateNotice")}</span></div>
+                  <div className="ai-candidate-list">
+                    {aiEnrichment.modelCandidates.map((candidate, index) => <article key={`${candidate.make}-${candidate.model}-${index}`}>
+                      <div><b>{String(index + 1).padStart(2, "0")}</b><strong>{[candidate.make, candidate.model].filter(Boolean).join(" ")}</strong><span>{t("lowConfidence")}</span></div>
+                      <p>{[candidate.modelYear, candidate.platform, candidate.bodyClass].filter(Boolean).join(" · ") || t("noMoreAttributes")}</p>
+                      {candidate.possibleTrims.length > 0 && <small>{t("possibleTrims")}{candidate.possibleTrims.join(" / ")}</small>}
+                      <em>{candidate.reason}</em>
+                    </article>)}
+                  </div>
+                </div>}
+                <small>{aiEnrichment.disclaimer}</small>
+              </div>}
+            </div>}
           </div>
-          {result ? <div className="vehicle-result"><div className="vehicle-icon">✓</div><div><span>当前车型</span><h3>{result.year} {result.make} {result.model}</h3><p>{[result.trim, result.engine].filter(Boolean).join(" · ") || "该车型没有更多配置数据"}</p></div><div className="match-badge">{engine ? "完整匹配" : trim ? "配置款匹配" : "车系匹配"}</div></div> : <div className="empty-result"><span>→</span> 从年款开始，逐级缩小车型范围</div>}
-        </div>
+        </section> : <section className="manual-section" id="manual-lookup-panel" role="tabpanel" aria-labelledby="manual-lookup-tab">
+          <div className="section-title"><div><p className="eyebrow">MANUAL LOOKUP</p><h2>{t("manualTitle")}</h2></div><p>{t("manualIntro")}</p></div>
+          <div className="finder-card">
+            <div className="select-grid">
+              <Select label={t("year")} step="01" value={year} disabled={!catalog} onChange={(value) => void chooseYear(value)} options={yearOptions} loading={queryLoading} selectText={t("select")} loadingText={t("loading")} />
+              <Select label={t("make")} step="02" value={make} disabled={!makes.length} onChange={(value) => void chooseMake(value)} options={makes} selectText={t("select")} loadingText={t("loading")} />
+              <Select label={t("model")} step="03" value={model} disabled={!models.length} onChange={(value) => void chooseModel(value)} options={models} selectText={t("select")} loadingText={t("loading")} />
+              <Select label={t("trim")} step="04" value={trim} disabled={!trims.length} onChange={(value) => void chooseTrim(value)} options={trimOptions} nullLabel={t("noTrim")} selectText={t("select")} loadingText={t("loading")} />
+              <Select label={t("engine")} step="05" value={engine} disabled={!engines.length} onChange={setEngine} options={engineOptions} nullLabel={t("noEngine")} selectText={t("select")} loadingText={t("loading")} />
+            </div>
+            {error && <div className="manual-error notice error">{error}</div>}
+            {result ? <div className="vehicle-result"><div className="vehicle-icon">✓</div><div><span>{t("currentVehicle")}</span><h3>{result.year} {result.make} {result.model}</h3><p>{[result.trim, result.engine].filter(Boolean).join(" · ") || t("noMoreData")}</p></div><div className="match-badge">{engine ? t("fullMatch") : trim ? t("trimMatch") : t("modelMatch")}</div></div> : <div className="empty-result"><span>→</span> {t("startFromYear")}</div>}
+          </div>
+        </section>}
       </section>
       {showSpecifications && (
         <section className="specifications-section" aria-labelledby="vehicle-specifications-title">
           <div className="specifications-heading">
-            <div><p className="eyebrow">{decodedVin ? "NHTSA VEHICLE DATA" : "MODEL SPECIFICATIONS"}</p><h2 id="vehicle-specifications-title">车辆规格详情</h2></div>
-            <span className="nhtsa-source-badge"><i /> {decodedVin ? "数据来源 · NHTSA vPIC" : "车型级资料 · D1 + NHTSA CVS"}</span>
+            <div><p className="eyebrow">{lookupMode === "vin" ? "NHTSA VEHICLE DATA" : "MODEL SPECIFICATIONS"}</p><h2 id="vehicle-specifications-title">{t("specifications")}</h2></div>
+            <span className="nhtsa-source-badge"><i /> {lookupMode === "vin" ? t("nhtsaSource") : t("modelSource")}</span>
           </div>
           <div className="vehicle-image-card" aria-live="polite">
-            {imageLoading ? <div className="vehicle-image-placeholder loading"><i /><span>正在异步查找同款车型参考图…</span></div> : vehicleImage ? (
+            {imageLoading ? <div className="vehicle-image-placeholder loading"><i /><span>{t("searchingImage")}</span></div> : vehicleImage ? (
               <>
                 <div className="vehicle-image-visual">
-                  <img src={vehicleImage.imageUrl} alt={`${specificationYear ?? ""} ${specificationMake ?? ""} ${specificationModel ?? ""} 同款车型参考图 ${selectedImageIndex + 1}`} loading="lazy" decoding="async" />
-                  {vehicleImages.length > 1 && <div className="vehicle-image-gallery" aria-label="车型参考图片画廊">
+                  <img src={vehicleImage.imageUrl} alt={`${specificationYear ?? ""} ${specificationMake ?? ""} ${specificationModel ?? ""} ${t("referenceImage")} ${selectedImageIndex + 1}`} loading="lazy" decoding="async" />
+                  {vehicleImages.length > 1 && <div className="vehicle-image-gallery" aria-label={t("imageGallery")}>
                     {vehicleImages.map((image, index) => (
-                      <button className={index === selectedImageIndex ? "active" : ""} type="button" onClick={() => setSelectedImageIndex(index)} aria-label={`查看第 ${index + 1} 张车型参考图`} aria-pressed={index === selectedImageIndex} key={image.imageUrl}>
+                      <button className={index === selectedImageIndex ? "active" : ""} type="button" onClick={() => setSelectedImageIndex(index)} aria-label={`${t("viewImage")} ${index + 1}`} aria-pressed={index === selectedImageIndex} key={image.imageUrl}>
                         <img src={image.imageUrl} alt="" loading="lazy" decoding="async" />
                       </button>
                     ))}
                   </div>}
                 </div>
                 <div className="vehicle-image-info">
-                  <span>同款车型参考图 · {selectedImageIndex + 1}/{vehicleImages.length}</span>
+                  <span>{imageVehicle?.inferred ? t("inferredReferenceImage") : t("referenceImage")} · {selectedImageIndex + 1}/{vehicleImages.length}</span>
+                  {imageVehicle?.inferred && <div className="inferred-image-notice"><b>AI</b><p>{t("inferredImageNotice")}</p></div>}
                   <strong>{vehicleImage.title}</strong>
                   {vehicleImage.description && <p>{vehicleImage.description}</p>}
                   <div className="vehicle-image-credit">
-                    <span>作者：{vehicleImage.artist ?? "Wikimedia Commons 贡献者"}</span>
-                    {vehicleImage.licenseUrl ? <a href={vehicleImage.licenseUrl} target="_blank" rel="noreferrer">{vehicleImage.license ?? "查看授权"}</a> : <span>{vehicleImage.license ?? "授权信息见来源页"}</span>}
-                    <a href={vehicleImage.sourceUrl} target="_blank" rel="noreferrer">查看图片来源 ↗</a>
+                    <span>{t("author")}{vehicleImage.artist ?? t("commonsContributor")}</span>
+                    {vehicleImage.licenseUrl ? <a href={vehicleImage.licenseUrl} target="_blank" rel="noreferrer">{vehicleImage.license ?? t("viewLicense")}</a> : <span>{vehicleImage.license ?? t("licenseAtSource")}</span>}
+                    <a href={vehicleImage.sourceUrl} target="_blank" rel="noreferrer">{t("viewSource")}</a>
                   </div>
                 </div>
               </>
-            ) : imageSearched ? <div className="vehicle-image-placeholder"><span>Wikimedia Commons 暂未找到可靠的同款车型参考图</span></div> : null}
+            ) : imageSearched ? <div className="vehicle-image-placeholder"><span>{t("noImage")}</span></div> : null}
           </div>
           <div className="specification-identity">
-            <div><span>{decodedVin ? "查询 VIN" : "车型条件"}</span><code>{decodedVin || [result?.year, result?.make, result?.model].filter(Boolean).join(" ")}</code></div>
-            <strong>{decoded
-              ? [decoded.year, decoded.make, decoded.model, decoded.trim].filter(Boolean).join(" ") || "NHTSA 未返回标准车型名称"
-              : [result?.year, result?.make, result?.model, result?.trim].filter(Boolean).join(" ")}</strong>
-            <p>{decoded
-              ? [decoded.bodyClass, decoded.displacementLiters ? `${decoded.displacementLiters}L` : null, decoded.fuelType].filter(Boolean).join(" · ") || "暂无车辆摘要"
-              : [result?.engine, manualDetails?.nhtsaModelMatched ? "NHTSA 已收录" : null, manualDetailsLoading ? "正在异步加载车型规格…" : null].filter(Boolean).join(" · ") || "车型级参考资料"}</p>
+            <div><span>{lookupMode === "vin" ? t("queriedVin") : t("vehicleCriteria")}</span><code>{lookupMode === "vin" ? decodedVin : [activeResult?.year, activeResult?.make, activeResult?.model].filter(Boolean).join(" ")}</code></div>
+            <strong>{activeDecoded
+              ? [activeDecoded.year, activeDecoded.make, activeDecoded.model, activeDecoded.trim].filter(Boolean).join(" ") || t("noStandardName")
+              : [activeResult?.year, activeResult?.make, activeResult?.model, activeResult?.trim].filter(Boolean).join(" ")}</strong>
+            <p>{activeDecoded
+              ? [activeDecoded.bodyClass, activeDecoded.displacementLiters ? `${activeDecoded.displacementLiters}L` : null, activeDecoded.fuelType].filter(Boolean).join(" · ") || t("noSummary")
+              : [activeResult?.engine, manualDetails?.nhtsaModelMatched ? t("nhtsaListed") : null, manualDetailsLoading ? t("loadingSpecs") : null].filter(Boolean).join(" · ") || t("modelReference")}</p>
           </div>
           <div className="specification-groups">
             {specificationGroups.map((group, groupIndex) => (
@@ -485,63 +646,72 @@ export function VehicleFinder() {
                 <dl>
                   {group.items.map(([label, value]) => (
                     <div className={value === null || value === "" ? "missing" : ""} key={String(label)}>
-                      <dt>{label}</dt><dd>{value ?? "未提供"}</dd>
+                      <dt>{label}</dt><dd>{value ?? t("missing")}</dd>
                     </div>
                   ))}
                 </dl>
               </section>
             ))}
           </div>
-          <p className="specifications-note">{decodedVin
-            ? "该区域仅展示 NHTSA vPIC 对当前 VIN 返回的字段；“未提供”表示接口没有返回可靠值。"
-            : "该区域基于年款、品牌和车系异步查询车型级资料；尺寸来自 NHTSA Canadian Vehicle Specifications，配置统计来自本地 D1。没有真实 VIN 时无法确定工厂、具体驱动和车辆序列信息。"} 车辆图片、市场价格和具体在售配置不属于 vPIC 数据。</p>
+          <p className="specifications-note">{lookupMode === "vin" ? t("vinSpecsNote") : t("manualSpecsNote")} {t("scopeNote")}</p>
         </section>
       )}
       {patternVehicle && (
         <section className="vin-guide-section">
           <section className="pattern-panel" aria-live="polite">
             <div className="pattern-header">
-              <div><p className="eyebrow">VIN FIELD GUIDE</p><h3>VIN 字段说明</h3></div>
-              {vinPattern && <span className="coverage-badge">{vinPattern.source === "nhtsa" ? "VIN 字符" : "已确定"} {vinPattern.knownCharacters}/{vinPattern.totalCharacters} 位</span>}
+              <div><p className="eyebrow">VIN FIELD GUIDE</p><h3>{t("vinGuide")}</h3></div>
+              {vinPattern && <span className="coverage-badge">{vinPattern.source === "nhtsa" ? t("vinChars") : t("determined")} {vinPattern.knownCharacters}/{vinPattern.totalCharacters}</span>}
             </div>
-            {patternLoading && !vinPattern ? <div className="pattern-loading">正在解析 VIN 结构…</div> : vinPattern && (
+            {patternLoading && !vinPattern ? <div className="pattern-loading">{t("parsingStructure")}</div> : vinPattern && (
               <>
-                <div className="pattern-code-block">
-                  <span className="pattern-caption">{vinPattern.source === "nhtsa" ? "NHTSA 查询 VIN" : "17位结构伪码"}</span>
-                  <strong>{vinPattern.pattern}</strong>
-                  <p>{vinPattern.source === "nhtsa" ? "完整字符来自本次 VIN 查询" : <><b>*</b> 代表当前数据无法确定的字符</>}</p>
+                <div className="vin-anatomy-heading">
+                  <span>{vinPattern.source === "nhtsa" ? t("queriedVinCaption") : t("pseudoVin")}</span>
+                  <p>{vinPattern.source === "nhtsa" ? t("allChars") : <><b>*</b> {t("starUnknown")}</>}</p>
                 </div>
-                <div className="pattern-sequence" aria-label={`VIN 伪码 ${vinPattern.pattern}`}>
-                  {vinPattern.segments.map((segment) => (
-                    <div className={segment.known ? "pattern-chunk known" : "pattern-chunk"} key={segment.key}>
-                      <span>{segment.positions} 位</span><strong>{segment.value}</strong><small>{segment.abbreviation}</small>
+                <div className="vin-anatomy-scroll">
+                  <div className="vin-anatomy" aria-label={`${t("vinDiagram")} ${vinPattern.pattern}`}>
+                    <div className="vin-anatomy-labels top" aria-hidden="true">
+                      <div className="vin-label range annotation-wmi"><strong>1–3</strong><span>{t("wmi")}</span></div>
+                      <div className="vin-label point annotation-check"><strong>9</strong><span>{t("checkDigit")}</span></div>
+                      <div className="vin-label point annotation-plant"><strong>11</strong><span>{t("plant")}</span></div>
+                      <div className="vin-label range annotation-serial"><strong>12–17</strong><span>{t("serial")}</span></div>
                     </div>
-                  ))}
+                    <div className="vin-character-row">
+                      {vinPattern.pattern.split("").map((character, index) => <div className={character === "*" ? "vin-character unknown" : "vin-character known"} key={`${character}-${index}`}>
+                        <small>{index + 1}</small><strong>{character}</strong>
+                      </div>)}
+                    </div>
+                    <div className="vin-anatomy-labels bottom" aria-hidden="true">
+                      <div className="vin-label range annotation-vds"><strong>4–8</strong><span>{t("vds")}</span></div>
+                      <div className="vin-label point annotation-year"><strong>10</strong><span>{t("modelYear")}</span></div>
+                    </div>
+                  </div>
                 </div>
-                <div className="meaning-title"><span>分段说明</span><p>{vinPattern.source === "nhtsa" ? "以下明确列出 NHTSA vPIC 返回的车型信息。" : "VIN 每一段由不同规则生成，不能仅凭车型名称反向推算。"}</p></div>
+                <div className="meaning-title"><span>{t("segmentDetails")}</span><p>{vinPattern.source === "nhtsa" ? t("nhtsaSegmentHint") : t("manualSegmentHint")}</p></div>
                 <div className="segment-grid">
                   {vinPattern.segments.map((segment) => (
                     <article className={segment.known ? "segment-card known" : "segment-card"} key={segment.key}>
-                      <div className="segment-card-top"><span>{segment.positions} 位</span><b>{vinPattern.source === "nhtsa" ? "VIN 已提供" : segment.known ? "已确定" : "待补充"}</b></div>
+                      <div className="segment-card-top"><span>{segment.positions}</span><b>{vinPattern.source === "nhtsa" ? t("vinProvided") : segment.known ? t("determined") : t("pending")}</b></div>
                       <code>{segment.value}</code>
                       <h4>{segment.name}</h4>
                       <small>{segment.abbreviation}</small>
                       <p>{segment.description}</p>
-                      {segment.nhtsaResult && <div className="nhtsa-result"><span>NHTSA 查询结果</span><p>{segment.nhtsaResult}</p></div>}
+                      {segment.nhtsaResult && <div className="nhtsa-result"><span>{t("nhtsaQueryResult")}</span><p>{segment.nhtsaResult}</p></div>}
                     </article>
                   ))}
                 </div>
-                <div className="pattern-disclaimer"><b>!</b><p><strong>重要说明</strong>{vinPattern.disclaimer}</p></div>
+                <div className="pattern-disclaimer"><b>!</b><p><strong>{t("important")}</strong>{vinPattern.disclaimer}</p></div>
               </>
             )}
           </section>
         </section>
       )}
-      <footer><span>Vehicle Lens POC</span><p>VIN 数据来自 NHTSA vPIC；查询结果仅供车型识别参考。</p></footer>
+      <footer><span>Vehicle Lens</span><p>{t("footer")}</p></footer>
     </main>
   );
 }
 
-function Select({ label, step, value, options, disabled, loading, onChange, nullLabel }: { label: string; step: string; value: string; options: string[]; disabled: boolean; loading?: boolean; onChange: (value: string) => void; nullLabel?: string }) {
-  return <label className={disabled ? "select-box disabled" : "select-box"}><span><b>{step}</b>{label}</span><select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">{loading ? "加载中…" : `请选择${label}`}</option>{options.map((option, index) => <option key={`${option}-${index}`} value={option}>{option === NONE ? nullLabel : option}</option>)}</select></label>;
+function Select({ label, step, value, options, disabled, loading, onChange, nullLabel, selectText, loadingText }: { label: string; step: string; value: string; options: string[]; disabled: boolean; loading?: boolean; onChange: (value: string) => void; nullLabel?: string; selectText: string; loadingText: string }) {
+  return <label className={disabled ? "select-box disabled" : "select-box"}><span><b>{step}</b>{label}</span><select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">{loading ? loadingText : `${selectText}${label}`}</option>{options.map((option, index) => <option key={`${option}-${index}`} value={option}>{option === NONE ? nullLabel : option}</option>)}</select></label>;
 }

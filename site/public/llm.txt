@@ -1,0 +1,6 @@
+# Vehicle Lens
+
+> Compatibility pointer: the standard AI-readable site description is available at `/llms.txt`.
+
+- [Read Vehicle Lens llms.txt](https://vin.carmodelx.com/llms.txt): Capabilities, data sources, limitations, and canonical links.
+- [Open Vehicle Lens](https://vin.carmodelx.com/): VIN decoder and manual vehicle lookup in Chinese, English, and Japanese.
